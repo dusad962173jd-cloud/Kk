@@ -22,6 +22,7 @@ export default function App() {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [actionText, setActionText] = useState<string | null>(null);
   const [textInput, setTextInput] = useState('');
+  const [chatTranscript, setChatTranscript] = useState<{role: 'user' | 'ai', text: string, finished?: boolean}[]>([]);
   
   // Settings State
   const [showSettings, setShowSettings] = useState(false);
@@ -40,6 +41,14 @@ export default function App() {
   const recorderRef = useRef<AudioRecorder | null>(null);
   const playerRef = useRef<AudioPlayer | null>(null);
   const speakingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const chatContainerRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll chat transcript
+  useEffect(() => {
+    if (chatContainerRef.current) {
+      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+    }
+  }, [chatTranscript]);
 
   // Listen to Auth State
   useEffect(() => {
@@ -177,6 +186,8 @@ IMPORTANT:
               silenceDurationMs: 500
             }
           },
+          inputAudioTranscription: {},
+          outputAudioTranscription: {},
           tools: [{
             functionDeclarations: [
               {
@@ -246,6 +257,37 @@ IMPORTANT:
             });
           },
           onmessage: (message: LiveServerMessage) => {
+            // Handle transcriptions
+            const inputTranscription = message.serverContent?.inputTranscription;
+            if (inputTranscription && inputTranscription.text) {
+              setChatTranscript(prev => {
+                const newTranscript = [...prev];
+                const last = newTranscript[newTranscript.length - 1];
+                if (last && last.role === 'user' && !last.finished) {
+                  last.text += inputTranscription.text;
+                  if (inputTranscription.finished) last.finished = true;
+                } else {
+                  newTranscript.push({ role: 'user', text: inputTranscription.text, finished: inputTranscription.finished });
+                }
+                return newTranscript;
+              });
+            }
+
+            const outputTranscription = message.serverContent?.outputTranscription;
+            if (outputTranscription && outputTranscription.text) {
+              setChatTranscript(prev => {
+                const newTranscript = [...prev];
+                const last = newTranscript[newTranscript.length - 1];
+                if (last && last.role === 'ai' && !last.finished) {
+                  last.text += outputTranscription.text;
+                  if (outputTranscription.finished) last.finished = true;
+                } else {
+                  newTranscript.push({ role: 'ai', text: outputTranscription.text, finished: outputTranscription.finished });
+                }
+                return newTranscript;
+              });
+            }
+
             const parts = message.serverContent?.modelTurn?.parts;
             if (parts) {
               for (const part of parts) {
@@ -265,7 +307,7 @@ IMPORTANT:
                   
                   if (call.name === 'makeCall') {
                     setActionText(`Calling ${args.phoneNumber}...`);
-                    window.open(`tel:${args.phoneNumber}`, '_self');
+                    window.open(`tel:${args.phoneNumber}`, '_top');
                     
                     sessionPromise.then(session => {
                       session.sendToolResponse({
@@ -278,7 +320,7 @@ IMPORTANT:
                     });
                   } else if (call.name === 'sendSMS') {
                     setActionText(`Messaging ${args.phoneNumber}...`);
-                    window.open(`sms:${args.phoneNumber}?body=${encodeURIComponent(args.message)}`, '_self');
+                    window.open(`sms:${args.phoneNumber}?body=${encodeURIComponent(args.message)}`, '_top');
                     
                     sessionPromise.then(session => {
                       session.sendToolResponse({
@@ -380,15 +422,19 @@ IMPORTANT:
     setIsConnecting(false);
     setIsSpeaking(false);
     setActionText(null);
+    setChatTranscript([]);
   };
 
   const handleSendText = (e: React.FormEvent) => {
     e.preventDefault();
     if (!textInput.trim() || !sessionRef.current) return;
 
+    const text = textInput.trim();
+    setChatTranscript(prev => [...prev, { role: 'user', text, finished: true }]);
+
     sessionRef.current.then((session: any) => {
       try {
-        session.sendClientContent({ turns: textInput.trim(), turnComplete: true });
+        session.sendClientContent({ turns: text, turnComplete: true });
         setTextInput('');
       } catch (err) {
         console.error("Error sending text:", err);
@@ -569,6 +615,27 @@ IMPORTANT:
 
         {/* Anime Character */}
         <AnimeCharacter isSpeaking={isSpeaking} isConnected={isConnected} isConnecting={isConnecting} />
+
+        {/* Chat Transcript */}
+        {isConnected && chatTranscript.length > 0 && (
+          <div 
+            ref={chatContainerRef}
+            className="w-full max-h-48 overflow-y-auto mb-4 flex flex-col gap-2 p-2 scrollbar-thin scrollbar-thumb-white/10"
+          >
+            {chatTranscript.map((msg, idx) => (
+              <div 
+                key={idx} 
+                className={`max-w-[85%] rounded-2xl px-4 py-2 text-sm ${
+                  msg.role === 'user' 
+                    ? 'bg-orange-600/20 text-orange-100 self-end rounded-br-sm' 
+                    : 'bg-white/10 text-white self-start rounded-bl-sm'
+                }`}
+              >
+                {msg.text}
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* Controls */}
         <div className="flex flex-col items-center gap-4 w-full">
