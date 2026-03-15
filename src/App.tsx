@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { GoogleGenAI, Modality, LiveServerMessage, Type } from '@google/genai';
 import { Mic, MicOff, Loader2, Volume2, Phone, MessageSquare, LogIn, LogOut, Settings, X, Users, History } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -21,6 +21,7 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [actionText, setActionText] = useState<string | null>(null);
+  const [textInput, setTextInput] = useState('');
   
   // Settings State
   const [showSettings, setShowSettings] = useState(false);
@@ -171,6 +172,11 @@ IMPORTANT:
 4. TONE MATCHING: Pay close attention to how the user speaks (their tone, slang, energy level, and vocabulary) and mirror it. If they are excited, be excited. If they use slang, use similar slang.
 5. TRAINING & MEMORY: If the user tells you to remember something, or tells you how to behave, call the 'saveMemory' tool immediately to save it.
 6. CHAT HISTORY: Call the 'logConversation' tool frequently to save the ongoing chat history so the user can view it later. Pass what the user said and what you replied.`,
+          realtimeInputConfig: {
+            automaticActivityDetection: {
+              silenceDurationMs: 500
+            }
+          },
           tools: [{
             functionDeclarations: [
               {
@@ -374,6 +380,20 @@ IMPORTANT:
     setIsConnecting(false);
     setIsSpeaking(false);
     setActionText(null);
+  };
+
+  const handleSendText = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!textInput.trim() || !sessionRef.current) return;
+
+    sessionRef.current.then((session: any) => {
+      try {
+        session.sendClientContent({ turns: textInput.trim(), turnComplete: true });
+        setTextInput('');
+      } catch (err) {
+        console.error("Error sending text:", err);
+      }
+    });
   };
 
   if (!isAuthReady) {
@@ -596,9 +616,28 @@ IMPORTANT:
             </button>
           )}
           
+          {isConnected && (
+            <form onSubmit={handleSendText} className="w-full mt-4 flex gap-2">
+              <input
+                type="text"
+                value={textInput}
+                onChange={(e) => setTextInput(e.target.value)}
+                placeholder="Type a message..."
+                className="flex-1 bg-white/5 border border-white/10 rounded-full px-4 py-3 text-sm text-white focus:outline-none focus:border-orange-500 transition-colors"
+              />
+              <button
+                type="submit"
+                disabled={!textInput.trim()}
+                className="bg-orange-600 hover:bg-orange-500 text-white rounded-full p-3 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+              >
+                <MessageSquare className="w-5 h-5" />
+              </button>
+            </form>
+          )}
+          
           <p className="text-xs text-white/40 mt-4 text-center max-w-xs">
             {isConnected 
-              ? "Listening... Ask me to call or message someone!" 
+              ? "Listening or typing... Ask me to call or message someone!" 
               : "Install this app on your phone to use calling & messaging features."}
           </p>
         </div>
