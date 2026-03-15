@@ -66,6 +66,35 @@ service cloud.firestore {
              data.totalConnections is number && data.totalConnections >= 0;
     }
 
+    function isValidContact(data) {
+      let allowedKeys = ['uid', 'name', 'phoneNumber', 'createdAt'];
+      return hasOnlyAllowedFields(allowedKeys) &&
+             hasRequiredFields(['uid', 'name', 'phoneNumber', 'createdAt']) &&
+             data.uid is string && data.uid.size() > 0 && data.uid.size() < 128 &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.phoneNumber is string && data.phoneNumber.size() > 0 && data.phoneNumber.size() < 20 &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidMemory(data) {
+      let allowedKeys = ['uid', 'fact', 'createdAt'];
+      return hasOnlyAllowedFields(allowedKeys) &&
+             hasRequiredFields(['uid', 'fact', 'createdAt']) &&
+             data.uid is string && data.uid.size() > 0 && data.uid.size() < 128 &&
+             data.fact is string && data.fact.size() > 0 && data.fact.size() < 1000 &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidChatMessage(data) {
+      let allowedKeys = ['uid', 'role', 'text', 'createdAt'];
+      return hasOnlyAllowedFields(allowedKeys) &&
+             hasRequiredFields(['uid', 'role', 'text', 'createdAt']) &&
+             data.uid is string && data.uid.size() > 0 && data.uid.size() < 128 &&
+             data.role in ['user', 'ai'] &&
+             data.text is string && data.text.size() > 0 && data.text.size() < 5000 &&
+             data.createdAt is timestamp;
+    }
+
     // ===============================================================
     // Rules
     // ===============================================================
@@ -82,6 +111,27 @@ service cloud.firestore {
       
       // Users cannot delete their profile directly from the app
       allow delete: if false;
+
+      match /contacts/{contactId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidContact(request.resource.data) && uidUnchanged();
+        allow update: if isOwner(userId) && isValidContact(request.resource.data) && uidNotModified() && request.resource.data.createdAt == resource.data.createdAt;
+        allow delete: if isOwner(userId);
+      }
+
+      match /memories/{memoryId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidMemory(request.resource.data) && uidUnchanged();
+        allow update: if isOwner(userId) && isValidMemory(request.resource.data) && uidNotModified() && request.resource.data.createdAt == resource.data.createdAt;
+        allow delete: if isOwner(userId);
+      }
+
+      match /chatHistory/{messageId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidChatMessage(request.resource.data) && uidUnchanged();
+        allow update: if false; // Chat messages should not be updated
+        allow delete: if isOwner(userId);
+      }
     }
   }
 }

@@ -5,13 +5,15 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { GoogleGenAI, Modality, LiveServerMessage, Type } from '@google/genai';
-import { Mic, MicOff, Loader2, Volume2, Phone, MessageSquare, LogIn, LogOut, Settings, X } from 'lucide-react';
+import { Mic, MicOff, Loader2, Volume2, Phone, MessageSquare, LogIn, LogOut, Settings, X, Users, History } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { AudioRecorder, AudioPlayer } from './lib/audioUtils';
 import { AnimeCharacter } from './components/AnimeCharacter';
+import { ContactsModal } from './components/ContactsModal';
+import { ChatHistoryModal } from './components/ChatHistoryModal';
 import { auth, db, signInWithGoogle, logOut } from './firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { doc, setDoc, getDoc, serverTimestamp, increment } from 'firebase/firestore';
+import { doc, setDoc, getDoc, addDoc, serverTimestamp, increment, collection, query, onSnapshot } from 'firebase/firestore';
 
 export default function App() {
   const [isConnected, setIsConnected] = useState(false);
@@ -22,12 +24,16 @@ export default function App() {
   
   // Settings State
   const [showSettings, setShowSettings] = useState(false);
+  const [showContacts, setShowContacts] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
   const [language, setLanguage] = useState(() => localStorage.getItem('ai_language') || 'Hinglish');
   const [customInstructions, setCustomInstructions] = useState(() => localStorage.getItem('ai_instructions') || "You are an anime character and the user's best friend. Speak casually. Use words like 'yaar', 'bhai', 'dost'.");
   
   // Firebase Auth State
   const [user, setUser] = useState<User | null>(null);
   const [isAuthReady, setIsAuthReady] = useState(false);
+  const [contactsList, setContactsList] = useState<{name: string, phoneNumber: string}[]>([]);
+  const [memoriesList, setMemoriesList] = useState<string[]>([]);
 
   const sessionRef = useRef<any>(null);
   const recorderRef = useRef<AudioRecorder | null>(null);
@@ -42,6 +48,41 @@ export default function App() {
     });
     return () => unsubscribe();
   }, []);
+
+  // Fetch Contacts & Memories
+  useEffect(() => {
+    if (!user) {
+      setContactsList([]);
+      setMemoriesList([]);
+      return;
+    }
+    
+    // Contacts
+    const qContacts = query(collection(db, `users/${user.uid}/contacts`));
+    const unsubContacts = onSnapshot(qContacts, (snapshot) => {
+      const contactsData: {name: string, phoneNumber: string}[] = [];
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        contactsData.push({ name: data.name, phoneNumber: data.phoneNumber });
+      });
+      setContactsList(contactsData);
+    });
+
+    // Memories
+    const qMemories = query(collection(db, `users/${user.uid}/memories`));
+    const unsubMemories = onSnapshot(qMemories, (snapshot) => {
+      const memoriesData: string[] = [];
+      snapshot.forEach((doc) => {
+        memoriesData.push(doc.data().fact);
+      });
+      setMemoriesList(memoriesData);
+    });
+
+    return () => {
+      unsubContacts();
+      unsubMemories();
+    };
+  }, [user]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -120,7 +161,16 @@ export default function App() {
           systemInstruction: `You are a smart AI assistant. The user's name is ${user.displayName?.split(' ')[0] || 'friend'}. 
 Language to use: ${language}.
 Custom Instructions from user: ${customInstructions}
-IMPORTANT: Respond INSTANTLY and quickly. Keep responses UNDER 10 words to minimize delay. You have perfect memory of this conversation. If the user asks you to call or message someone, ask for their number and use the provided tools to do it.`,
+User's Saved Contacts: ${contactsList.length > 0 ? contactsList.map(c => `${c.name}: ${c.phoneNumber}`).join(', ') : 'No contacts saved.'}
+User's Saved Memories & Training: ${memoriesList.length > 0 ? memoriesList.join(' | ') : 'No memories saved yet.'}
+
+IMPORTANT: 
+1. Respond INSTANTLY and quickly. Keep responses UNDER 10 words to minimize delay. 
+2. You have perfect memory of this conversation. 
+3. If the user asks you to call or message someone, check their Saved Contacts list first. If the name is there, use the provided tools to call/message that number. If not, ask for their number.
+4. TONE MATCHING: Pay close attention to how the user speaks (their tone, slang, energy level, and vocabulary) and mirror it. If they are excited, be excited. If they use slang, use similar slang.
+5. TRAINING & MEMORY: If the user tells you to remember something, or tells you how to behave, call the 'saveMemory' tool immediately to save it.
+6. CHAT HISTORY: Call the 'logConversation' tool frequently to save the ongoing chat history so the user can view it later. Pass what the user said and what you replied.`,
           tools: [{
             functionDeclarations: [
               {
@@ -144,6 +194,29 @@ IMPORTANT: Respond INSTANTLY and quickly. Keep responses UNDER 10 words to minim
                     message: { type: Type.STRING, description: "The text message content" }
                   },
                   required: ["phoneNumber", "message"]
+                }
+              },
+              {
+                name: "saveMemory",
+                description: "Save a fact, preference, or training instruction about the user so you remember it in future sessions.",
+                parameters: {
+                  type: Type.OBJECT,
+                  properties: {
+                    fact: { type: Type.STRING, description: "The fact or instruction to remember" }
+                  },
+                  required: ["fact"]
+                }
+              },
+              {
+                name: "logConversation",
+                description: "Save a part of the conversation to the chat history.",
+                parameters: {
+                  type: Type.OBJECT,
+                  properties: {
+                    userMessage: { type: Type.STRING, description: "What the user just said" },
+                    aiResponse: { type: Type.STRING, description: "What you replied" }
+                  },
+                  required: ["userMessage", "aiResponse"]
                 }
               }
             ]
@@ -208,6 +281,49 @@ IMPORTANT: Respond INSTANTLY and quickly. Keep responses UNDER 10 words to minim
                           id: call.id,
                           response: { result: "SMS app opened on user's device." }
                         }]
+                      });
+                    });
+                  } else if (call.name === 'saveMemory') {
+                    setActionText(`Saving memory...`);
+                    addDoc(collection(db, `users/${user.uid}/memories`), {
+                      uid: user.uid,
+                      fact: args.fact,
+                      createdAt: serverTimestamp()
+                    }).then(() => {
+                      sessionPromise.then(session => {
+                        session.sendToolResponse({
+                          functionResponses: [{
+                            name: call.name,
+                            id: call.id,
+                            response: { result: "Memory saved successfully." }
+                          }]
+                        });
+                      });
+                    });
+                  } else if (call.name === 'logConversation') {
+                    // Save user message
+                    addDoc(collection(db, `users/${user.uid}/chatHistory`), {
+                      uid: user.uid,
+                      role: 'user',
+                      text: args.userMessage,
+                      createdAt: serverTimestamp()
+                    }).then(() => {
+                      // Save AI response
+                      addDoc(collection(db, `users/${user.uid}/chatHistory`), {
+                        uid: user.uid,
+                        role: 'ai',
+                        text: args.aiResponse,
+                        createdAt: serverTimestamp()
+                      });
+                    }).then(() => {
+                      sessionPromise.then(session => {
+                        session.sendToolResponse({
+                          functionResponses: [{
+                            name: call.name,
+                            id: call.id,
+                            response: { result: "Conversation logged successfully." }
+                          }]
+                        });
                       });
                     });
                   }
@@ -278,13 +394,33 @@ IMPORTANT: Respond INSTANTLY and quickly. Keep responses UNDER 10 words to minim
 
       {/* Header / Auth */}
       <div className="absolute top-0 left-0 right-0 p-4 flex justify-between items-center z-20">
-        <button 
-          onClick={() => setShowSettings(true)}
-          className="p-2 bg-white/5 hover:bg-white/10 rounded-full border border-white/10 transition-colors text-white/70 hover:text-white"
-          title="Settings"
-        >
-          <Settings className="w-5 h-5" />
-        </button>
+        <div className="flex gap-2">
+          <button 
+            onClick={() => setShowSettings(true)}
+            className="p-2 bg-white/5 hover:bg-white/10 rounded-full border border-white/10 transition-colors text-white/70 hover:text-white"
+            title="Settings"
+          >
+            <Settings className="w-5 h-5" />
+          </button>
+          {user && (
+            <>
+              <button 
+                onClick={() => setShowContacts(true)}
+                className="p-2 bg-white/5 hover:bg-white/10 rounded-full border border-white/10 transition-colors text-white/70 hover:text-white"
+                title="My Contacts"
+              >
+                <Users className="w-5 h-5" />
+              </button>
+              <button 
+                onClick={() => setShowHistory(true)}
+                className="p-2 bg-white/5 hover:bg-white/10 rounded-full border border-white/10 transition-colors text-white/70 hover:text-white"
+                title="Chat History"
+              >
+                <History className="w-5 h-5" />
+              </button>
+            </>
+          )}
+        </div>
 
         {user ? (
           <div className="flex items-center gap-4 bg-white/5 px-4 py-2 rounded-full border border-white/10">
@@ -378,6 +514,14 @@ IMPORTANT: Respond INSTANTLY and quickly. Keep responses UNDER 10 words to minim
               </button>
             </motion.div>
           </motion.div>
+        )}
+
+        {showContacts && user && (
+          <ContactsModal user={user} onClose={() => setShowContacts(false)} />
+        )}
+
+        {showHistory && user && (
+          <ChatHistoryModal user={user} onClose={() => setShowHistory(false)} />
         )}
       </AnimatePresence>
 

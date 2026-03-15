@@ -32,6 +32,77 @@
         }
       },
       "required": ["uid", "displayName", "email", "lastConnectedAt", "totalConnections"]
+    },
+    "Contact": {
+      "title": "Contact",
+      "description": "A saved contact for the user to call or message.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "The ID of the user who owns this contact."
+        },
+        "name": {
+          "type": "string",
+          "description": "The name of the contact."
+        },
+        "phoneNumber": {
+          "type": "string",
+          "description": "The phone number of the contact."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the contact was created."
+        }
+      },
+      "required": ["uid", "name", "phoneNumber", "createdAt"]
+    },
+    "Memory": {
+      "title": "Memory",
+      "description": "A saved fact, preference, or training instruction for the AI.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "The ID of the user."
+        },
+        "fact": {
+          "type": "string",
+          "description": "The fact or instruction to remember."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the memory was created."
+        }
+      },
+      "required": ["uid", "fact", "createdAt"]
+    },
+    "ChatMessage": {
+      "title": "ChatMessage",
+      "description": "A saved message from the chat history.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "The ID of the user."
+        },
+        "role": {
+          "type": "string",
+          "description": "The role of the sender (user or ai)."
+        },
+        "text": {
+          "type": "string",
+          "description": "The text content of the message."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the message was created."
+        }
+      },
+      "required": ["uid", "role", "text", "createdAt"]
     }
   },
   "firestore": {
@@ -40,6 +111,24 @@
         "$ref": "#/entities/UserProfile"
       },
       "description": "User profiles collection."
+    },
+    "/users/{userId}/contacts/{contactId}": {
+      "schema": {
+        "$ref": "#/entities/Contact"
+      },
+      "description": "User's saved contacts for calling and messaging."
+    },
+    "/users/{userId}/memories/{memoryId}": {
+      "schema": {
+        "$ref": "#/entities/Memory"
+      },
+      "description": "User's saved facts, preferences, and training instructions."
+    },
+    "/users/{userId}/chatHistory/{messageId}": {
+      "schema": {
+        "$ref": "#/entities/ChatMessage"
+      },
+      "description": "User's chat history with the AI."
     }
   }
 }
