@@ -1,0 +1,7 @@
+{
+  "name": "Voice AI Assistant",
+  "description": "A real-time voice assistant that can converse in Hindi and English using the Gemini Live API.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}

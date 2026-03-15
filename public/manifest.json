@@ -1,0 +1,17 @@
+{
+  "name": "Anime Friend AI",
+  "short_name": "AnimeAI",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0a0502",
+  "theme_color": "#ea580c",
+  "description": "Your personal Anime AI friend that can talk and help with tasks.",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='50' fill='%23ea580c'/><text x='50' y='50' font-family='Arial' font-size='40' fill='white' text-anchor='middle' dy='.3em'>AI</text></svg>",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
