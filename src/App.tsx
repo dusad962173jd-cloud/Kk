@@ -5,10 +5,13 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { GoogleGenAI, Modality, LiveServerMessage, Type } from '@google/genai';
-import { Mic, MicOff, Loader2, Volume2, Phone, MessageSquare } from 'lucide-react';
+import { Mic, MicOff, Loader2, Volume2, Phone, MessageSquare, LogIn, LogOut } from 'lucide-react';
 import { motion } from 'motion/react';
 import { AudioRecorder, AudioPlayer } from './lib/audioUtils';
 import { AnimeCharacter } from './components/AnimeCharacter';
+import { auth, db, signInWithGoogle, logOut } from './firebase';
+import { onAuthStateChanged, User } from 'firebase/auth';
+import { doc, setDoc, getDoc, serverTimestamp, increment } from 'firebase/firestore';
 
 export default function App() {
   const [isConnected, setIsConnected] = useState(false);
@@ -16,11 +19,24 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [actionText, setActionText] = useState<string | null>(null);
+  
+  // Firebase Auth State
+  const [user, setUser] = useState<User | null>(null);
+  const [isAuthReady, setIsAuthReady] = useState(false);
 
   const sessionRef = useRef<any>(null);
   const recorderRef = useRef<AudioRecorder | null>(null);
   const playerRef = useRef<AudioPlayer | null>(null);
   const speakingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Listen to Auth State
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      setIsAuthReady(true);
+    });
+    return () => unsubscribe();
+  }, []);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -29,10 +45,53 @@ export default function App() {
     };
   }, []);
 
+  const handleFirestoreError = (err: unknown, operation: string) => {
+    console.error(`Firestore Error during ${operation}:`, err);
+    // In a real app, you might want to show a toast or alert here
+  };
+
+  const updateUserProfile = async (currentUser: User) => {
+    try {
+      const userRef = doc(db, 'users', currentUser.uid);
+      const userSnap = await getDoc(userRef);
+      
+      if (userSnap.exists()) {
+        await setDoc(userRef, {
+          uid: currentUser.uid,
+          displayName: currentUser.displayName || 'User',
+          email: currentUser.email || '',
+          photoURL: currentUser.photoURL || '',
+          lastConnectedAt: serverTimestamp(),
+          totalConnections: increment(1)
+        }, { merge: true });
+      } else {
+        await setDoc(userRef, {
+          uid: currentUser.uid,
+          displayName: currentUser.displayName || 'User',
+          email: currentUser.email || '',
+          photoURL: currentUser.photoURL || '',
+          lastConnectedAt: serverTimestamp(),
+          totalConnections: 1
+        });
+      }
+    } catch (err) {
+      handleFirestoreError(err, 'updateUserProfile');
+    }
+  };
+
   const connect = async () => {
+    if (!user) {
+      setError("Please sign in first to chat with your Anime Friend.");
+      return;
+    }
+
     setIsConnecting(true);
     setError(null);
     setActionText(null);
+    
+    // Update user stats in Firestore
+    await updateUserProfile(user);
+
     try {
       // Initialize the Gemini API client right before connecting
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY as string });
@@ -47,7 +106,7 @@ export default function App() {
           speechConfig: {
             voiceConfig: { prebuiltVoiceConfig: { voiceName: "Zephyr" } },
           },
-          systemInstruction: "You are an anime character and the user's best friend. Speak casually in a mix of Hindi and English (Hinglish). Use words like 'yaar', 'bhai', 'dost'. IMPORTANT: Respond INSTANTLY. Keep responses UNDER 10 words. If the user asks you to call or message someone, ask for their number and use the provided tools to do it.",
+          systemInstruction: `You are an anime character and the user's best friend. The user's name is ${user.displayName?.split(' ')[0] || 'friend'}. Speak casually in a mix of Hindi and English (Hinglish). Use words like 'yaar', 'bhai', 'dost'. IMPORTANT: Respond INSTANTLY. Keep responses UNDER 10 words. If the user asks you to call or message someone, ask for their number and use the provided tools to do it.`,
           tools: [{
             functionDeclarations: [
               {
@@ -187,6 +246,14 @@ export default function App() {
     setActionText(null);
   };
 
+  if (!isAuthReady) {
+    return (
+      <div className="min-h-screen bg-[#0a0502] flex items-center justify-center">
+        <Loader2 className="w-8 h-8 text-orange-500 animate-spin" />
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-[#0a0502] text-white flex flex-col items-center justify-center p-6 font-sans relative overflow-hidden">
       {/* Atmospheric background */}
@@ -195,7 +262,31 @@ export default function App() {
         <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-indigo-600/20 rounded-full mix-blend-screen filter blur-[100px] animate-pulse" style={{ animationDelay: '2s' }} />
       </div>
 
-      <div className="z-10 flex flex-col items-center max-w-md w-full">
+      {/* Header / Auth */}
+      <div className="absolute top-0 left-0 right-0 p-4 flex justify-end z-20">
+        {user ? (
+          <div className="flex items-center gap-4 bg-white/5 px-4 py-2 rounded-full border border-white/10">
+            <div className="flex items-center gap-2">
+              {user.photoURL && (
+                <img src={user.photoURL} alt="Profile" className="w-6 h-6 rounded-full" referrerPolicy="no-referrer" />
+              )}
+              <span className="text-sm text-white/80">{user.displayName?.split(' ')[0]}</span>
+            </div>
+            <button onClick={logOut} className="text-white/50 hover:text-white transition-colors" title="Sign Out">
+              <LogOut className="w-4 h-4" />
+            </button>
+          </div>
+        ) : (
+          <button 
+            onClick={signInWithGoogle}
+            className="flex items-center gap-2 bg-white/10 hover:bg-white/20 px-4 py-2 rounded-full border border-white/10 transition-colors text-sm"
+          >
+            <LogIn className="w-4 h-4" /> Sign In
+          </button>
+        )}
+      </div>
+
+      <div className="z-10 flex flex-col items-center max-w-md w-full mt-12">
         <motion.div 
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -228,32 +319,43 @@ export default function App() {
             </div>
           )}
 
-          <button
-            onClick={isConnected ? disconnect : connect}
-            disabled={isConnecting}
-            className={`
-              relative overflow-hidden group px-8 py-4 rounded-full font-medium tracking-wide transition-all duration-300
-              ${isConnected 
-                ? 'bg-white/10 text-white hover:bg-white/20 border border-white/10' 
-                : 'bg-orange-600 text-white hover:bg-orange-500 shadow-[0_0_20px_rgba(234,88,12,0.4)]'
-              }
-              disabled:opacity-50 disabled:cursor-not-allowed
-            `}
-          >
-            <span className="relative z-10 flex items-center gap-2">
-              {isConnecting ? (
-                <>Connecting...</>
-              ) : isConnected ? (
-                <>
-                  <MicOff className="w-4 h-4" /> End Conversation
-                </>
-              ) : (
-                <>
-                  <Mic className="w-4 h-4" /> Chat with Friend
-                </>
-              )}
-            </span>
-          </button>
+          {!user ? (
+            <button
+              onClick={signInWithGoogle}
+              className="relative overflow-hidden group px-8 py-4 rounded-full font-medium tracking-wide transition-all duration-300 bg-orange-600 text-white hover:bg-orange-500 shadow-[0_0_20px_rgba(234,88,12,0.4)]"
+            >
+              <span className="relative z-10 flex items-center gap-2">
+                <LogIn className="w-4 h-4" /> Sign in with Google to Chat
+              </span>
+            </button>
+          ) : (
+            <button
+              onClick={isConnected ? disconnect : connect}
+              disabled={isConnecting}
+              className={`
+                relative overflow-hidden group px-8 py-4 rounded-full font-medium tracking-wide transition-all duration-300
+                ${isConnected 
+                  ? 'bg-white/10 text-white hover:bg-white/20 border border-white/10' 
+                  : 'bg-orange-600 text-white hover:bg-orange-500 shadow-[0_0_20px_rgba(234,88,12,0.4)]'
+                }
+                disabled:opacity-50 disabled:cursor-not-allowed
+              `}
+            >
+              <span className="relative z-10 flex items-center gap-2">
+                {isConnecting ? (
+                  <>Connecting...</>
+                ) : isConnected ? (
+                  <>
+                    <MicOff className="w-4 h-4" /> End Conversation
+                  </>
+                ) : (
+                  <>
+                    <Mic className="w-4 h-4" /> Chat with Friend
+                  </>
+                )}
+              </span>
+            </button>
+          )}
           
           <p className="text-xs text-white/40 mt-4 text-center max-w-xs">
             {isConnected 

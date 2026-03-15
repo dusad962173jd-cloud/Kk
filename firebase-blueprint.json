@@ -1,0 +1,45 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Stores user profile information and connection stats.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "The user's unique ID."
+        },
+        "displayName": {
+          "type": "string",
+          "description": "The user's display name."
+        },
+        "email": {
+          "type": "string",
+          "description": "The user's email address."
+        },
+        "photoURL": {
+          "type": "string",
+          "description": "The user's profile picture URL."
+        },
+        "lastConnectedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp of the last time the user connected to the AI."
+        },
+        "totalConnections": {
+          "type": "number",
+          "description": "Total number of times the user has connected."
+        }
+      },
+      "required": ["uid", "displayName", "email", "lastConnectedAt", "totalConnections"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": {
+        "$ref": "#/entities/UserProfile"
+      },
+      "description": "User profiles collection."
+    }
+  }
+}
