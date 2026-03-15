@@ -271,14 +271,14 @@ IMPORTANT:
           onmessage: (message: LiveServerMessage) => {
             // Handle transcriptions
             const inputTranscription = message.serverContent?.inputTranscription;
-            if (inputTranscription && inputTranscription.text) {
+            if (inputTranscription) {
               setChatTranscript(prev => {
                 const newTranscript = [...prev];
                 const last = newTranscript[newTranscript.length - 1];
                 if (last && last.role === 'user' && !last.finished) {
-                  last.text += inputTranscription.text;
+                  if (inputTranscription.text) last.text += inputTranscription.text;
                   if (inputTranscription.finished) last.finished = true;
-                } else {
+                } else if (inputTranscription.text) {
                   newTranscript.push({ role: 'user', text: inputTranscription.text, finished: inputTranscription.finished });
                 }
                 return newTranscript;
@@ -286,15 +286,26 @@ IMPORTANT:
             }
 
             const outputTranscription = message.serverContent?.outputTranscription;
-            if (outputTranscription && outputTranscription.text) {
+            if (outputTranscription) {
               setChatTranscript(prev => {
                 const newTranscript = [...prev];
                 const last = newTranscript[newTranscript.length - 1];
                 if (last && last.role === 'ai' && !last.finished) {
-                  last.text += outputTranscription.text;
+                  if (outputTranscription.text) last.text += outputTranscription.text;
                   if (outputTranscription.finished) last.finished = true;
-                } else {
+                } else if (outputTranscription.text) {
                   newTranscript.push({ role: 'ai', text: outputTranscription.text, finished: outputTranscription.finished });
+                }
+                return newTranscript;
+              });
+            }
+
+            if (message.serverContent?.turnComplete) {
+              setChatTranscript(prev => {
+                const newTranscript = [...prev];
+                const last = newTranscript[newTranscript.length - 1];
+                if (last && last.role === 'ai' && !last.finished) {
+                  last.finished = true;
                 }
                 return newTranscript;
               });
@@ -303,6 +314,20 @@ IMPORTANT:
             const parts = message.serverContent?.modelTurn?.parts;
             if (parts) {
               for (const part of parts) {
+                // Handle text parts (if model decides to send text directly)
+                if (part.text) {
+                  setChatTranscript(prev => {
+                    const newTranscript = [...prev];
+                    const last = newTranscript[newTranscript.length - 1];
+                    if (last && last.role === 'ai' && !last.finished) {
+                      last.text += part.text;
+                    } else {
+                      newTranscript.push({ role: 'ai', text: part.text, finished: false });
+                    }
+                    return newTranscript;
+                  });
+                }
+
                 // Handle incoming audio
                 if (part.inlineData && part.inlineData.data) {
                   if (isMicOnRef.current) {
@@ -323,6 +348,12 @@ IMPORTANT:
                     setActionText(`Ready to call ${args.phoneNumber}`);
                     setPendingAction({ type: 'call', number: args.phoneNumber });
                     
+                    // Attempt auto-trigger
+                    const a = document.createElement('a');
+                    a.href = `tel:${args.phoneNumber}`;
+                    a.target = '_blank';
+                    a.click();
+                    
                     sessionPromise.then(session => {
                       session.sendToolResponse({
                         functionResponses: [{
@@ -335,6 +366,12 @@ IMPORTANT:
                   } else if (call.name === 'sendSMS') {
                     setActionText(`Ready to message ${args.phoneNumber}`);
                     setPendingAction({ type: 'sms', number: args.phoneNumber, message: args.message });
+                    
+                    // Attempt auto-trigger
+                    const a = document.createElement('a');
+                    a.href = `sms:${args.phoneNumber}?body=${encodeURIComponent(args.message)}`;
+                    a.target = '_blank';
+                    a.click();
                     
                     sessionPromise.then(session => {
                       session.sendToolResponse({
@@ -449,7 +486,10 @@ IMPORTANT:
 
     sessionRef.current.then((session: any) => {
       try {
-        session.sendClientContent({ turns: text, turnComplete: true });
+        session.sendClientContent({ 
+          turns: [{ role: 'user', parts: [{ text }] }], 
+          turnComplete: true 
+        });
         setTextInput('');
       } catch (err) {
         console.error("Error sending text:", err);
@@ -637,7 +677,8 @@ IMPORTANT:
           >
             <a
               href={pendingAction.type === 'call' ? `tel:${pendingAction.number}` : `sms:${pendingAction.number}?body=${encodeURIComponent(pendingAction.message || '')}`}
-              target="_top"
+              target="_blank"
+              rel="noopener noreferrer"
               onClick={() => setPendingAction(null)}
               className="block w-full bg-green-600 hover:bg-green-500 text-white text-center py-4 rounded-2xl font-semibold shadow-lg transition-all"
             >
