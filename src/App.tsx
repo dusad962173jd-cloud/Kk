@@ -23,7 +23,18 @@ export default function App() {
   const [actionText, setActionText] = useState<string | null>(null);
   const [textInput, setTextInput] = useState('');
   const [chatTranscript, setChatTranscript] = useState<{role: 'user' | 'ai', text: string, finished?: boolean}[]>([]);
+  const [isMicOn, setIsMicOn] = useState(false);
+  const isMicOnRef = useRef(isMicOn);
+  const [pendingAction, setPendingAction] = useState<{type: 'call' | 'sms', number: string, message?: string} | null>(null);
   
+  useEffect(() => {
+    isMicOnRef.current = isMicOn;
+    if (!isMicOn && playerRef.current) {
+      playerRef.current.stop();
+      setIsSpeaking(false);
+    }
+  }, [isMicOn]);
+
   // Settings State
   const [showSettings, setShowSettings] = useState(false);
   const [showContacts, setShowContacts] = useState(false);
@@ -246,6 +257,7 @@ IMPORTANT:
             
             // Start capturing audio from microphone
             recorderRef.current?.start((base64) => {
+              if (!isMicOnRef.current) return;
               sessionPromise.then(session => {
                 session.sendRealtimeInput({
                   media: { data: base64, mimeType: 'audio/pcm;rate=16000' }
@@ -293,11 +305,13 @@ IMPORTANT:
               for (const part of parts) {
                 // Handle incoming audio
                 if (part.inlineData && part.inlineData.data) {
-                  setIsSpeaking(true);
-                  playerRef.current?.play(part.inlineData.data);
-                  
-                  if (speakingTimeoutRef.current) clearTimeout(speakingTimeoutRef.current);
-                  speakingTimeoutRef.current = setTimeout(() => setIsSpeaking(false), 300); 
+                  if (isMicOnRef.current) {
+                    setIsSpeaking(true);
+                    playerRef.current?.play(part.inlineData.data);
+                    
+                    if (speakingTimeoutRef.current) clearTimeout(speakingTimeoutRef.current);
+                    speakingTimeoutRef.current = setTimeout(() => setIsSpeaking(false), 300); 
+                  }
                 }
                 
                 // Handle Tool Calls (Mobile Tasks)
@@ -306,28 +320,28 @@ IMPORTANT:
                   const args = call.args as any;
                   
                   if (call.name === 'makeCall') {
-                    setActionText(`Calling ${args.phoneNumber}...`);
-                    window.open(`tel:${args.phoneNumber}`, '_top');
+                    setActionText(`Ready to call ${args.phoneNumber}`);
+                    setPendingAction({ type: 'call', number: args.phoneNumber });
                     
                     sessionPromise.then(session => {
                       session.sendToolResponse({
                         functionResponses: [{
                           name: call.name,
                           id: call.id,
-                          response: { result: "Call initiated on user's device." }
+                          response: { result: "Prompted user to initiate call." }
                         }]
                       });
                     });
                   } else if (call.name === 'sendSMS') {
-                    setActionText(`Messaging ${args.phoneNumber}...`);
-                    window.open(`sms:${args.phoneNumber}?body=${encodeURIComponent(args.message)}`, '_top');
+                    setActionText(`Ready to message ${args.phoneNumber}`);
+                    setPendingAction({ type: 'sms', number: args.phoneNumber, message: args.message });
                     
                     sessionPromise.then(session => {
                       session.sendToolResponse({
                         functionResponses: [{
                           name: call.name,
                           id: call.id,
-                          response: { result: "SMS app opened on user's device." }
+                          response: { result: "Prompted user to send SMS." }
                         }]
                       });
                     });
@@ -422,6 +436,7 @@ IMPORTANT:
     setIsConnecting(false);
     setIsSpeaking(false);
     setActionText(null);
+    setPendingAction(null);
     setChatTranscript([]);
   };
 
@@ -608,8 +623,26 @@ IMPORTANT:
             animate={{ opacity: 1, y: 0 }}
             className="mb-4 px-4 py-2 bg-green-500/20 border border-green-500/50 rounded-full text-green-300 text-sm flex items-center gap-2"
           >
-            {actionText.includes('Calling') ? <Phone className="w-4 h-4" /> : <MessageSquare className="w-4 h-4" />}
+            {actionText.includes('Call') ? <Phone className="w-4 h-4" /> : <MessageSquare className="w-4 h-4" />}
             {actionText}
+          </motion.div>
+        )}
+
+        {/* Pending Action Button */}
+        {pendingAction && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="mb-6 w-full"
+          >
+            <a
+              href={pendingAction.type === 'call' ? `tel:${pendingAction.number}` : `sms:${pendingAction.number}?body=${encodeURIComponent(pendingAction.message || '')}`}
+              target="_top"
+              onClick={() => setPendingAction(null)}
+              className="block w-full bg-green-600 hover:bg-green-500 text-white text-center py-4 rounded-2xl font-semibold shadow-lg transition-all"
+            >
+              {pendingAction.type === 'call' ? `Tap to Call ${pendingAction.number}` : `Tap to Message ${pendingAction.number}`}
+            </a>
           </motion.div>
         )}
 
@@ -685,6 +718,18 @@ IMPORTANT:
           
           {isConnected && (
             <form onSubmit={handleSendText} className="w-full mt-4 flex gap-2">
+              <button
+                type="button"
+                onClick={() => setIsMicOn(!isMicOn)}
+                className={`rounded-full p-3 transition-colors flex items-center justify-center ${
+                  isMicOn 
+                    ? 'bg-orange-600 text-white hover:bg-orange-500 shadow-[0_0_15px_rgba(234,88,12,0.4)]' 
+                    : 'bg-white/10 text-white/50 hover:bg-white/20'
+                }`}
+                title={isMicOn ? "Turn Mic Off" : "Turn Mic On"}
+              >
+                {isMicOn ? <Mic className="w-5 h-5" /> : <MicOff className="w-5 h-5" />}
+              </button>
               <input
                 type="text"
                 value={textInput}
@@ -704,7 +749,7 @@ IMPORTANT:
           
           <p className="text-xs text-white/40 mt-4 text-center max-w-xs">
             {isConnected 
-              ? "Listening or typing... Ask me to call or message someone!" 
+              ? (isMicOn ? "Listening... Ask me to call or message someone!" : "Type a message, or turn on the mic to speak.") 
               : "Install this app on your phone to use calling & messaging features."}
           </p>
         </div>
