@@ -5,8 +5,8 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { GoogleGenAI, Modality, LiveServerMessage, Type } from '@google/genai';
-import { Mic, MicOff, Loader2, Volume2, Phone, MessageSquare, LogIn, LogOut } from 'lucide-react';
-import { motion } from 'motion/react';
+import { Mic, MicOff, Loader2, Volume2, Phone, MessageSquare, LogIn, LogOut, Settings, X } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
 import { AudioRecorder, AudioPlayer } from './lib/audioUtils';
 import { AnimeCharacter } from './components/AnimeCharacter';
 import { auth, db, signInWithGoogle, logOut } from './firebase';
@@ -19,6 +19,11 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [actionText, setActionText] = useState<string | null>(null);
+  
+  // Settings State
+  const [showSettings, setShowSettings] = useState(false);
+  const [language, setLanguage] = useState(() => localStorage.getItem('ai_language') || 'Hinglish');
+  const [customInstructions, setCustomInstructions] = useState(() => localStorage.getItem('ai_instructions') || "You are an anime character and the user's best friend. Speak casually. Use words like 'yaar', 'bhai', 'dost'.");
   
   // Firebase Auth State
   const [user, setUser] = useState<User | null>(null);
@@ -44,6 +49,12 @@ export default function App() {
       disconnect();
     };
   }, []);
+
+  // Save settings to local storage
+  useEffect(() => {
+    localStorage.setItem('ai_language', language);
+    localStorage.setItem('ai_instructions', customInstructions);
+  }, [language, customInstructions]);
 
   const handleFirestoreError = (err: unknown, operation: string) => {
     console.error(`Firestore Error during ${operation}:`, err);
@@ -106,7 +117,10 @@ export default function App() {
           speechConfig: {
             voiceConfig: { prebuiltVoiceConfig: { voiceName: "Zephyr" } },
           },
-          systemInstruction: `You are an anime character and the user's best friend. The user's name is ${user.displayName?.split(' ')[0] || 'friend'}. Speak casually in a mix of Hindi and English (Hinglish). Use words like 'yaar', 'bhai', 'dost'. IMPORTANT: Respond INSTANTLY. Keep responses UNDER 10 words. If the user asks you to call or message someone, ask for their number and use the provided tools to do it.`,
+          systemInstruction: `You are a smart AI assistant. The user's name is ${user.displayName?.split(' ')[0] || 'friend'}. 
+Language to use: ${language}.
+Custom Instructions from user: ${customInstructions}
+IMPORTANT: Respond INSTANTLY and quickly. Keep responses UNDER 10 words to minimize delay. You have perfect memory of this conversation. If the user asks you to call or message someone, ask for their number and use the provided tools to do it.`,
           tools: [{
             functionDeclarations: [
               {
@@ -263,7 +277,15 @@ export default function App() {
       </div>
 
       {/* Header / Auth */}
-      <div className="absolute top-0 left-0 right-0 p-4 flex justify-end z-20">
+      <div className="absolute top-0 left-0 right-0 p-4 flex justify-between items-center z-20">
+        <button 
+          onClick={() => setShowSettings(true)}
+          className="p-2 bg-white/5 hover:bg-white/10 rounded-full border border-white/10 transition-colors text-white/70 hover:text-white"
+          title="Settings"
+        >
+          <Settings className="w-5 h-5" />
+        </button>
+
         {user ? (
           <div className="flex items-center gap-4 bg-white/5 px-4 py-2 rounded-full border border-white/10">
             <div className="flex items-center gap-2">
@@ -285,6 +307,79 @@ export default function App() {
           </button>
         )}
       </div>
+
+      {/* Settings Modal */}
+      <AnimatePresence>
+        {showSettings && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+          >
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-[#151619] border border-white/10 rounded-2xl p-6 w-full max-w-md shadow-2xl relative"
+            >
+              <button 
+                onClick={() => setShowSettings(false)}
+                className="absolute top-4 right-4 text-white/50 hover:text-white transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+              
+              <h2 className="text-xl font-medium mb-6 flex items-center gap-2">
+                <Settings className="w-5 h-5 text-orange-500" /> AI Settings
+              </h2>
+
+              <div className="space-y-5">
+                <div>
+                  <label className="block text-sm font-medium text-white/70 mb-2">
+                    Language (Bhasha)
+                  </label>
+                  <select 
+                    value={language}
+                    onChange={(e) => setLanguage(e.target.value)}
+                    className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-orange-500 transition-colors appearance-none"
+                  >
+                    <option value="Hinglish">Hinglish (Hindi + English)</option>
+                    <option value="Hindi">Hindi (Pure)</option>
+                    <option value="Bhojpuri">Bhojpuri</option>
+                    <option value="English">English</option>
+                    <option value="Spanish">Spanish</option>
+                    <option value="French">French</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-white/70 mb-2">
+                    Custom Instructions (Train your AI)
+                  </label>
+                  <textarea 
+                    value={customInstructions}
+                    onChange={(e) => setCustomInstructions(e.target.value)}
+                    placeholder="E.g., Act like a professional coding expert..."
+                    rows={4}
+                    className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-orange-500 transition-colors resize-none text-sm"
+                  />
+                  <p className="text-xs text-white/40 mt-2">
+                    Tell the AI how to behave. It will remember this and previous questions in the chat.
+                  </p>
+                </div>
+              </div>
+
+              <button 
+                onClick={() => setShowSettings(false)}
+                className="w-full mt-6 bg-orange-600 hover:bg-orange-500 text-white font-medium py-3 rounded-xl transition-colors"
+              >
+                Save & Close
+              </button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <div className="z-10 flex flex-col items-center max-w-md w-full mt-12">
         <motion.div 
